@@ -1,0 +1,268 @@
+:root {
+  color: #18211d;
+  background: #edf0ee;
+}
+
+.panel {
+  border-color: #cdd4d0;
+  background: #ffffff;
+}
+
+.reviewCard,
+.poolCard,
+.planMetrics span,
+.planSlot,
+.swapRow {
+  border-color: #d3d9d5;
+  background: #fafcfb;
+}
+
+.uploadDrop {
+  border-color: #8da89a;
+  background: #ffffff;
+}
+
+.profileBadge,
+.fieldReviewBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid #45515b;
+  border-radius: 6px;
+  background: #171c20;
+  color: #c9d1d7;
+  font-size: 12px;
+}
+
+.profileBadge.needsReview,
+.fieldReviewBadge.needsReview {
+  border-color: #d38b2c;
+  background: #2b2114;
+  color: #ffd28a;
+}
+
+.fieldReview {
+  display: grid;
+  gap: 6px;
+}
+
+.fieldReview.needsReview input,
+.fieldReview.needsReview select {
+  border-color: #d38b2c;
+  box-shadow: 0 0 0 1px rgba(211, 139, 44, 0.28);
+}
+
+.candidateRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.candidateButton {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #56636d;
+  border-radius: 5px;
+  background: #20272c;
+  color: #edf1f3;
+  cursor: pointer;
+}
+
+.reviewReason {
+  color: #f0b35f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.profileActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.affixFieldGroup {
+  min-width: 0;
+}
+
+.affixFieldGroup select,
+.affixFieldGroup input {
+  width: 100%;
+  min-width: 0;
+}
+
+.affixRow {
+  align-items: start;
+}
+
+.affixRow > small {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+  .profileBadge {
+    width: 100%;
+  }
+
+  .candidateButton {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
+.benchmarkPage {
+  width: min(1500px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 48px;
+}
+
+.benchmarkHeader,
+.benchmarkControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.benchmarkHeader h1 {
+  margin: 4px 0 8px;
+  font-size: 28px;
+}
+
+.benchmarkHeader span,
+.benchmarkHeader p,
+.benchmarkHeader a {
+  color: #aeb8be;
+}
+
+.benchmarkControls {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin: 22px 0;
+  padding: 14px;
+  border: 1px solid #364149;
+  background: #151a1e;
+}
+
+.benchmarkControls button,
+.benchmarkControls .primaryButton {
+  min-height: 38px;
+}
+
+.benchmarkControls strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: #cbd3d8;
+}
+
+.benchmarkMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.benchmarkMetric {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-left: 3px solid #4ea37b;
+  background: #171d21;
+}
+
+.benchmarkMetric.danger {
+  border-color: #db765f;
+  background: #291b19;
+}
+
+.benchmarkMetric span {
+  color: #aeb8be;
+  font-size: 12px;
+}
+
+.benchmarkMetric strong {
+  font-size: 22px;
+}
+
+.benchmarkTableWrap {
+  overflow: auto;
+  border: 1px solid #364149;
+}
+
+.benchmarkTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.benchmarkTable th,
+.benchmarkTable td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #303940;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.benchmarkTable th {
+  position: sticky;
+  top: 0;
+  background: #20272c;
+}
+
+.benchmarkTable tr.benchmarkFailed {
+  background: #2a1c1a;
+}
+
+.benchmarkSynthetic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 20px;
+  align-items: center;
+  margin: 24px 0 18px;
+  padding: 16px;
+  border: 1px solid #364149;
+  background: #151a1e;
+}
+
+.benchmarkSynthetic h2 {
+  margin: 3px 0 7px;
+  font-size: 20px;
+}
+
+.benchmarkSynthetic span,
+.benchmarkSynthetic p,
+.benchmarkSynthetic strong {
+  color: #aeb8be;
+  font-size: 13px;
+}
+
+.benchmarkSynthetic p {
+  margin: 0;
+  max-width: 900px;
+}
+
+.benchmarkSynthetic strong {
+  grid-column: 1 / -1;
+  font-weight: 500;
+}
+
+@media (max-width: 760px) {
+  .benchmarkHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .benchmarkMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .benchmarkSynthetic {
+    grid-template-columns: 1fr;
+  }
+
+  .benchmarkSynthetic button {
+    justify-self: start;
+  }
+}

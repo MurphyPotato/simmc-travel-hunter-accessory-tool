@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a calculation, OCR, startup, or packaging problem
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: dropdown
+    id: version
+    attributes:
+      label: Tool version
+      options: [v4, v3, v3-old, v2, v1, Android v2]
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Windows version, Minecraft version, font/resource pack, or Android device if relevant
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include reproduction steps and the expected result. Remove private data before attaching files.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Drag files here. For OCR reports, include the original tooltip and the field that needs correction.
