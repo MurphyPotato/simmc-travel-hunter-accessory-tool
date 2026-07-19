@@ -8,6 +8,7 @@ The MIT license in this repository applies only to original project code and doc
 | Vite | MIT | Build and development tooling |
 | Lucide | ISC | Interface icons |
 | Capacitor | MIT | Legacy Android experiment |
+| Capacitor Filesystem | MIT | Android v4 private accessory-library persistence |
 | Gradle build tooling | Apache-2.0 | Legacy Android experiment; the wrapper JAR is regenerated locally and is not committed |
 | Tesseract.js | Apache-2.0 | Browser OCR worker |
 | Tesseract OCR core | Apache-2.0 | WebAssembly OCR engine |

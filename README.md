@@ -4,15 +4,29 @@
 [![Latest release](https://img.shields.io/github/v/release/MurphyPotato/simmc-travel-hunter-accessory-tool?label=latest)](https://github.com/MurphyPotato/simmc-travel-hunter-accessory-tool/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-面向 simMC 旅行猎手玩法的离线饰品 OCR、仓库管理与剑/弓最优配装计算工具。推荐使用 **v4**。
+面向 simMC 旅行猎手玩法的离线饰品 OCR、仓库管理与剑/弓最优配装计算工具。推荐使用 **v4**，Windows 与 Android 在同一个 Release 发布。
 
 ## 下载与安装
 
-1. 打开 [Releases](https://github.com/MurphyPotato/simmc-travel-hunter-accessory-tool/releases/latest)。
-2. 下载 `travel-hunter-accessory-tool-v4-win.zip`。
-3. 解压整个 ZIP，不要直接在压缩软件里运行。
-4. 双击 `启动工具.bat`。
-5. 保持黑色启动窗口打开；关闭该窗口即停止工具。
+| 平台 | 最新版本 | 直接下载 |
+| --- | --- | --- |
+| Windows | v4 | [travel-hunter-accessory-tool-v4-win.zip](https://github.com/MurphyPotato/simmc-travel-hunter-accessory-tool/releases/download/v4/travel-hunter-accessory-tool-v4-win.zip) |
+| Android | v4 | [travel-hunter-accessory-tool-v4-android-debug.apk](https://github.com/MurphyPotato/simmc-travel-hunter-accessory-tool/releases/download/v4/travel-hunter-accessory-tool-v4-android-debug.apk) |
+
+[查看 v4 Release 与全部附件](https://github.com/MurphyPotato/simmc-travel-hunter-accessory-tool/releases/tag/v4)
+
+### Windows
+
+1. 下载并完整解压 Windows ZIP，不要直接在压缩软件里运行。
+2. 双击 `启动工具.bat`。
+3. 保持黑色启动窗口打开；关闭该窗口即停止工具。
+
+### Android
+
+1. 下载 APK 到手机；红米 K50 / 澎湃 OS 安装时，按系统提示允许当前文件来源“安装未知应用”。
+2. 安装后直接打开“旅行猎手饰品工具”，不需要保留后台服务。
+3. APK 不申请联网权限，OCR、语言模型和饰品计算均在手机本地运行。
+4. v2 与 v4 APK 使用相同包名和签名，可从 v2 直接覆盖升级到 v4。
 
 玩家不需要安装 Node、npm 或开发环境。工具和 OCR 均在本机离线运行。
 
@@ -33,18 +47,17 @@ flowchart LR
 4. 至少确认一件后点击“计算并替换”。缺失部位会使用空白饰品占位。
 5. 在方案预览中切换剑套和弓套，按截图与完整词条在游戏内找到对应饰品。
 
-v4 会把已确认饰品和截图保存在工具目录的 `data/accessories-v4.json`。移动工具时请移动整个解压目录。
+Windows v4 会把已确认饰品和截图保存在工具目录的 `data/accessories-v4.json`；Android v4 保存到应用私有数据目录。升级应用会保留数据，卸载应用会由系统删除该目录。
 
 ## 版本
 
 | 版本 | 状态 | 说明 |
 | --- | --- | --- |
-| v4 | 推荐 | 双字体 OCR、字段级置信度、目录持久化、剑/弓最优配装 |
+| v4 | 推荐，Windows/Android | 双字体 OCR、字段级置信度、持久化饰品库、剑/弓最优配装 |
 | v3 | 历史稳定版 | 仓库式流程和目录持久化，使用旧 OCR 内核 |
 | v3-old | 历史版 | 仓库式流程，不保存已确认饰品 |
-| v2 | 历史版 | 四件套编辑器和首次教程 |
+| v2 | 历史版，Windows/Android | 四件套编辑器和首次教程；[下载 v2 Android APK](https://github.com/MurphyPotato/simmc-travel-hunter-accessory-tool/releases/download/v2/travel-hunter-accessory-tool-v2-android-debug.apk) |
 | v1 | 历史版 | 基础饰品对比计算器 |
-| Android v2 | 实验版 | 早期 Capacitor 移植，不再作为当前发行目标 |
 
 各版本 ZIP 可在 [全部 Releases](https://github.com/MurphyPotato/simmc-travel-hunter-accessory-tool/releases) 下载。详细变更见 [版本历史](docs/VERSION_HISTORY.md)。
 
@@ -63,16 +76,17 @@ v4 会把已确认饰品和截图保存在工具目录的 `data/accessories-v4.j
 npm ci
 npm test
 npm run build:v4
+npm run build:android:v4
 npm run dev:v4
 ```
 
-首次构建会联网下载 Tesseract 语言数据；生成的玩家发行包仍完全离线。其他版本使用 `build:v1`、`build:v2`、`build:v3-old`、`build:v3` 构建。
+首次构建会联网下载 Tesseract 语言数据；生成的玩家发行包仍完全离线。Android APK 构建命令为 `npm run package:android:v4:debug`，需要 JDK 21 和 Android SDK。详细说明见 [Android 构建文档](docs/ANDROID.md)。
 
 ## 隐私与数据
 
 - 工具不上传截图、OCR 文本或饰品数据。
 - 仓库不包含真实测试截图、玩家饰品库、Minecraft/ModernUI JAR 或本机字体缓存。
-- 发布 ZIP 的校验值见 [SHA256SUMS](checksums/SHA256SUMS.txt)。
+- Windows ZIP 与 Android APK 的校验值见 [SHA256SUMS](checksums/SHA256SUMS.txt)。
 
 ## License
 

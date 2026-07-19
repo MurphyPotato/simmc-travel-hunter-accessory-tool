@@ -28,3 +28,4 @@ jobs:
       - run: npm run build:v3
       - run: npm run build:v4
       - run: npm run build:android
+      - run: npm run build:android:v4

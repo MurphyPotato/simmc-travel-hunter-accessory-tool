@@ -7,7 +7,7 @@ Included:
 - React/TypeScript source for v1, v2, v3-old, v3 and v4
 - OCR decision logic, generated compatibility templates and unit tests
 - Windows build/package scripts
-- Filtered legacy Capacitor Android project
+- Legacy Android v2 project and isolated Android v4 Capacitor project
 - Empty v3/v4 data-store templates
 
 Excluded:

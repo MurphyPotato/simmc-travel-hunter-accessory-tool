@@ -1,4 +1,5 @@
 import { Accessory, AccessoryQuality, AccessorySlot, Affix, DisplayStat } from "./domain";
+import { Capacitor } from "@capacitor/core";
 
 export interface AccessoryStoreFile {
   schema: "travel-hunter-accessory-tool:v4/accessories";
@@ -15,6 +16,7 @@ export interface StorageResult {
 
 const storageEndpoint = "/api/v4/accessories";
 const schema = "travel-hunter-accessory-tool:v4/accessories";
+const nativeStoragePath = "accessories-v4.json";
 
 const validSlots = new Set<AccessorySlot>(["mainRing", "subRing", "mainAmulet", "subAmulet"]);
 const validQualities = new Set<AccessoryQuality>(["dim", "fine", "divine"]);
@@ -34,6 +36,10 @@ const validStats = new Set<DisplayStat>([
 ]);
 
 export async function loadAccessoryPoolFromFile(): Promise<StorageResult> {
+  if (Capacitor.isNativePlatform()) {
+    return loadAccessoryPoolFromNativeFile();
+  }
+
   try {
     const response = await fetch(storageEndpoint, {
       method: "GET",
@@ -63,6 +69,10 @@ export async function saveAccessoryPoolToFile(accessories: Accessory[]): Promise
     accessories: sanitizeAccessories(accessories),
   };
 
+  if (Capacitor.isNativePlatform()) {
+    return saveAccessoryPoolToNativeFile(payload);
+  }
+
   try {
     const response = await fetch(storageEndpoint, {
       method: "PUT",
@@ -81,6 +91,64 @@ export async function saveAccessoryPoolToFile(accessories: Accessory[]): Promise
       accessories: payload.accessories,
     };
   }
+}
+
+export function accessoryStorageLocation(): string {
+  return Capacitor.isNativePlatform()
+    ? "手机应用数据目录 accessories-v4.json"
+    : "工具目录 data/accessories-v4.json";
+}
+
+async function loadAccessoryPoolFromNativeFile(): Promise<StorageResult> {
+  try {
+    const { Directory, Encoding, Filesystem } = await import("@capacitor/filesystem");
+    const result = await Filesystem.readFile({
+      path: nativeStoragePath,
+      directory: Directory.Data,
+      encoding: Encoding.UTF8,
+    });
+    const text = typeof result.data === "string" ? result.data : await result.data.text();
+    const payload = JSON.parse(text) as Partial<AccessoryStoreFile>;
+    return {
+      ok: true,
+      accessories: sanitizeAccessories(Array.isArray(payload.accessories) ? payload.accessories : []),
+    };
+  } catch (error) {
+    if (isMissingNativeFile(error)) {
+      return { ok: true, accessories: [] };
+    }
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "无法读取手机饰品库",
+      accessories: [],
+    };
+  }
+}
+
+async function saveAccessoryPoolToNativeFile(payload: AccessoryStoreFile): Promise<StorageResult> {
+  try {
+    const { Directory, Encoding, Filesystem } = await import("@capacitor/filesystem");
+    await Filesystem.writeFile({
+      path: nativeStoragePath,
+      directory: Directory.Data,
+      encoding: Encoding.UTF8,
+      data: JSON.stringify(payload),
+    });
+    return { ok: true, accessories: payload.accessories };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "无法保存手机饰品库",
+      accessories: payload.accessories,
+    };
+  }
+}
+
+function isMissingNativeFile(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  return code === "OS-PLUG-FILE-0008" || /not found|does not exist|不存在/i.test(message);
 }
 
 export function sanitizeAccessories(accessories: Accessory[]): Accessory[] {

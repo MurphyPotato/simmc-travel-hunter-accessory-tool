@@ -32,7 +32,12 @@ import {
 } from "./domain";
 import { recognizeAccessoryImageV4 } from "./ocrV4";
 import { OcrFieldResult, OcrProfile, OcrReviewFields, ParsedAccessoryV4 } from "./ocrV4Types";
-import { loadAccessoryPoolFromFile, saveAccessoryPoolToFile, sanitizeAccessories } from "./v4Storage";
+import {
+  accessoryStorageLocation,
+  loadAccessoryPoolFromFile,
+  saveAccessoryPoolToFile,
+  sanitizeAccessories,
+} from "./v4Storage";
 import { APP_VERSION } from "./appConfig";
 
 type RecognitionStatus = "queued" | "recognizing" | "ready" | "error";
@@ -62,6 +67,7 @@ interface SwapLogEntry {
 
 type StorageStatus = "loading" | "ready" | "saving" | "error";
 const hasFileStorage = APP_VERSION === "v4";
+const storageLocation = accessoryStorageLocation();
 
 function AppV4() {
   const [recognitionItems, setRecognitionItems] = useState<RecognitionItem[]>([]);
@@ -72,7 +78,7 @@ function AppV4() {
   const [pasteHint, setPasteHint] = useState("窗口在前台时可直接 Ctrl+V 粘贴截图。");
   const [storageStatus, setStorageStatus] = useState<StorageStatus>(hasFileStorage ? "loading" : "ready");
   const [storageMessage, setStorageMessage] = useState(
-    hasFileStorage ? "正在读取工具目录 data/accessories-v4.json" : "",
+    hasFileStorage ? `正在读取${storageLocation}` : "",
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const poolLoadedRef = useRef(false);
@@ -104,10 +110,10 @@ function AppV4() {
         const restored = result.accessories ?? [];
         setPool(restored);
         setStorageStatus("ready");
-        setStorageMessage(`已从工具目录恢复 ${restored.length} 件已确认饰品。`);
+        setStorageMessage(`已从${storageLocation}恢复 ${restored.length} 件已确认饰品。`);
       } else {
         setStorageStatus("error");
-        setStorageMessage(`文件保存不可用：${result.error ?? "无法访问保存接口"}`);
+        setStorageMessage(`饰品库保存不可用：${result.error ?? "无法访问保存位置"}`);
       }
     });
     return () => {
@@ -122,7 +128,7 @@ function AppV4() {
       void saveAccessoryPoolToFile(pool).then((result) => {
         if (result.ok) {
           setStorageStatus("ready");
-          setStorageMessage(`已保存 ${pool.length} 件饰品到工具目录 data/accessories-v4.json。`);
+          setStorageMessage(`已保存 ${pool.length} 件饰品到${storageLocation}。`);
         } else {
           setStorageStatus("error");
           setStorageMessage(`保存失败：${result.error ?? "无法写入工具目录"}`);

@@ -5,9 +5,21 @@ import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const version = process.argv[2];
+const targets = {
+  v1: { appVersion: "v1", relativeAssets: false },
+  v2: { appVersion: "v2", relativeAssets: false },
+  "v3-old": { appVersion: "v3-old", relativeAssets: false },
+  v3: { appVersion: "v3", relativeAssets: false },
+  v4: { appVersion: "v4", relativeAssets: false },
+  "android-v2": { appVersion: "android-v2", relativeAssets: true },
+  "android-v4": { appVersion: "v4", relativeAssets: true },
+};
+const target = targets[version];
 
-if (!["v1", "v2", "v3-old", "v3", "v4", "android-v2"].includes(version)) {
-  throw new Error("Usage: node tools/build-version.mjs v1|v2|v3-old|v3|v4|android-v2");
+if (!target) {
+  throw new Error(
+    "Usage: node tools/build-version.mjs v1|v2|v3-old|v3|v4|android-v2|android-v4",
+  );
 }
 
 run(process.execPath, [join(root, "tools", "prepare-ocr.mjs")]);
@@ -15,11 +27,11 @@ run(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc")]);
 const outDir = join(root, "dist", version);
 rmSync(outDir, { recursive: true, force: true });
 const viteArgs = ["build", "--outDir", `dist/${version}`];
-if (version === "android-v2") {
+if (target.relativeAssets) {
   viteArgs.push("--base", "./");
 }
 run(process.execPath, [join(root, "node_modules", "vite", "bin", "vite.js"), ...viteArgs], {
-  VITE_APP_VERSION: version,
+  VITE_APP_VERSION: target.appVersion,
 });
 sanitizeDirectory(outDir);
 assertNoRemoteOcr(outDir);
@@ -54,7 +66,7 @@ function sanitizeFile(file) {
 }
 
 function ocrAssetPrefix() {
-  return version === "android-v2" ? "./ocr/" : "/ocr/";
+  return target.relativeAssets ? "./ocr/" : "/ocr/";
 }
 
 function assertNoRemoteOcr(dir) {

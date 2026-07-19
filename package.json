@@ -30,6 +30,7 @@
     "build:v3": "node tools/build-version.mjs v3",
     "build:v4": "node tools/build-version.mjs v4",
     "build:android": "node tools/build-version.mjs android-v2",
+    "build:android:v4": "node tools/build-version.mjs android-v4",
     "prepare:ocr": "node tools/prepare-ocr.mjs",
     "prepare:v4-fonts": "node tools/extract-v4-modernui-fonts.mjs",
     "package:win": "node tools/package-win.mjs",
@@ -37,12 +38,15 @@
     "package:win:v3": "node tools/package-win.mjs v3",
     "package:win:v4": "node tools/package-win.mjs v4",
     "package:android": "node tools/package-android.mjs",
+    "package:android:v2:debug": "node tools/package-android.mjs",
+    "package:android:v4:debug": "node tools/package-android-v4.mjs debug",
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
     "@capacitor/core": "^8.4.1",
+    "@capacitor/filesystem": "^8.1.2",
     "@vitejs/plugin-react": "^4.3.4",
     "lucide-react": "^0.475.0",
     "react": "^19.0.0",

@@ -71,6 +71,7 @@ export async function recognizeAccessoryImage(
     workerPath: `${ocrBasePath}/worker.min.js`,
     corePath: `${ocrBasePath}/core`,
     langPath: `${ocrBasePath}/lang`,
+    gzip: !IS_ANDROID_APP,
     cacheMethod: "none",
     logger: (message) => {
       onProgress?.({

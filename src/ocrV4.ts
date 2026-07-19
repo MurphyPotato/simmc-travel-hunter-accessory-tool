@@ -1,4 +1,5 @@
 import { PSM, Worker } from "tesseract.js";
+import { Capacitor } from "@capacitor/core";
 import {
   Accessory,
   AccessoryQuality,
@@ -156,12 +157,14 @@ export async function recognizeAccessoryImageV4(
     bitmap.close?.();
   }
 
-  const ocrBasePath = "/ocr";
+  const isNativePlatform = Capacitor.isNativePlatform();
+  const ocrBasePath = isNativePlatform ? "./ocr" : "/ocr";
   return withV4OcrWorker(
     {
       workerPath: `${ocrBasePath}/worker.min.js`,
       corePath: `${ocrBasePath}/core`,
       langPath: `${ocrBasePath}/lang`,
+      gzip: !isNativePlatform,
     },
     onProgress,
     async (worker) => {

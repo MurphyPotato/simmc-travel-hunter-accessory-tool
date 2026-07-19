@@ -6,6 +6,13 @@ interface PooledWorker {
   onProgress?: (progress: OcrProgress) => void;
 }
 
+interface WorkerPaths {
+  workerPath: string;
+  corePath: string;
+  langPath: string;
+  gzip?: boolean;
+}
+
 const idle: PooledWorker[] = [];
 const waiting: Array<(worker: PooledWorker) => void> = [];
 const all = new Set<PooledWorker>();
@@ -13,7 +20,7 @@ const maximumWorkers = 2;
 let creating = 0;
 
 export async function withV4OcrWorker<T>(
-  paths: { workerPath: string; corePath: string; langPath: string },
+  paths: WorkerPaths,
   onProgress: ((progress: OcrProgress) => void) | undefined,
   task: (worker: Worker) => Promise<T>,
 ): Promise<T> {
@@ -35,7 +42,7 @@ export async function terminateV4OcrWorkers(): Promise<void> {
   await Promise.all(workers.map((pooled) => pooled.worker.terminate()));
 }
 
-async function acquire(paths: { workerPath: string; corePath: string; langPath: string }): Promise<PooledWorker> {
+async function acquire(paths: WorkerPaths): Promise<PooledWorker> {
   const available = idle.pop();
   if (available) return available;
   if (all.size + creating < maximumWorkers) {
