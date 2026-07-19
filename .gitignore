@@ -15,6 +15,7 @@ analysis_outputs/
 data/*
 !data/accessories-v3.json
 !data/accessories-v4.json
+!data/accessories-v5.json
 
 android/.gradle/
 android/.idea/

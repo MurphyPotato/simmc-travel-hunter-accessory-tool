@@ -44,4 +44,6 @@ export interface ParsedAccessoryV4 {
   profileReasons: string[];
   diagnostics: string[];
   fields: OcrReviewFields;
+  tooltipImageUrl?: string;
+  tooltipCropReason?: string;
 }

@@ -10,7 +10,7 @@ import {
   recognizeMinecraftNumber,
   renderTextMask,
 } from "./ocrV4Templates";
-import { classifyProfileMetrics } from "./ocrV4";
+import { classifyProfileMetrics, isPlausiblePersistentAffixGeometry } from "./ocrV4";
 
 describe("v4 OCR decisions", () => {
   it("uses sequence-sensitive matching for bow and sword labels", () => {
@@ -179,5 +179,12 @@ describe("v4 font profile routing", () => {
     });
 
     expect(result.profile).toBe("unknown");
+  });
+});
+
+describe("v5 persistent tooltip crop", () => {
+  it("rejects a wide Minecraft tooltip border as the final affix row", () => {
+    expect(isPlausiblePersistentAffixGeometry(1045, 16)).toBe(false);
+    expect(isPlausiblePersistentAffixGeometry(802, 76)).toBe(true);
   });
 });

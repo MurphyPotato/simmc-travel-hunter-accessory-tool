@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { assertOfflineRuntime } from "./assert-offline-runtime.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const version = process.argv[2];
@@ -11,6 +12,7 @@ const targets = {
   "v3-old": { appVersion: "v3-old", relativeAssets: false },
   v3: { appVersion: "v3", relativeAssets: false },
   v4: { appVersion: "v4", relativeAssets: false },
+  v5: { appVersion: "v5", relativeAssets: false },
   "android-v2": { appVersion: "android-v2", relativeAssets: true },
   "android-v4": { appVersion: "v4", relativeAssets: true },
 };
@@ -18,7 +20,7 @@ const target = targets[version];
 
 if (!target) {
   throw new Error(
-    "Usage: node tools/build-version.mjs v1|v2|v3-old|v3|v4|android-v2|android-v4",
+    "Usage: node tools/build-version.mjs v1|v2|v3-old|v3|v4|v5|android-v2|android-v4",
   );
 }
 
@@ -35,6 +37,7 @@ run(process.execPath, [join(root, "node_modules", "vite", "bin", "vite.js"), ...
 });
 sanitizeDirectory(outDir);
 assertNoRemoteOcr(outDir);
+if (version === "v5") assertOfflineRuntime(outDir);
 
 function run(command, args, env = {}) {
   execFileSync(command, args, {

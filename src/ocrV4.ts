@@ -33,7 +33,7 @@ import {
   OcrProfile,
   ParsedAccessoryV4,
 } from "./ocrV4Types";
-import { withV4OcrWorker } from "./ocrV4WorkerPool";
+import { V4_OCR_IDLE_TIMEOUT_MS, withV4OcrWorker } from "./ocrV4WorkerPool";
 
 export interface OcrProgress {
   status: string;
@@ -44,6 +44,11 @@ export interface ProfileMetrics {
   purpleBackgroundRatio: number;
   antialiasRatio: number;
   coloredTextRatio: number;
+}
+
+export interface V4RecognitionOptions {
+  captureTooltipCrop?: boolean;
+  manageWorkerLifecycle?: boolean;
 }
 
 export interface V4OcrDebugLine {
@@ -95,6 +100,12 @@ interface Rect {
   height: number;
 }
 
+interface CropDetection {
+  rect: Rect;
+  detected: boolean;
+  reason?: string;
+}
+
 interface OcrObservation {
   text: string;
   confidence: number;
@@ -128,6 +139,9 @@ interface PreparedTooltip {
   profile: Exclude<OcrProfile, "unknown">;
   lines: PreparedLine[];
   fallbackImages: string[];
+  captureTooltipCrop: boolean;
+  tooltipImageUrl?: string;
+  tooltipCropReason?: string;
 }
 
 const OCR_VALUE_CHARS = "+0123456789.";
@@ -136,6 +150,7 @@ export async function recognizeAccessoryImageV4(
   image: File | string,
   onProgress?: (progress: OcrProgress) => void,
   forcedProfile?: Exclude<OcrProfile, "unknown">,
+  options: V4RecognitionOptions = {},
 ): Promise<ParsedAccessoryV4> {
   const bitmap = await loadBitmap(image);
   let detection: ProfileDetection;
@@ -152,7 +167,7 @@ export async function recognizeAccessoryImageV4(
     const profiles: Array<Exclude<OcrProfile, "unknown">> = detection.profile === "unknown"
       ? ["minecraft-1.21.8", "modernui-source-han"]
       : [detection.profile];
-    prepared = profiles.map((profile) => prepareTooltip(bitmap, profile));
+    prepared = profiles.map((profile) => prepareTooltip(bitmap, profile, options.captureTooltipCrop === true));
   } finally {
     bitmap.close?.();
   }
@@ -182,6 +197,9 @@ export async function recognizeAccessoryImageV4(
       }
       return chooseProfileResult(results, detection);
     },
+    options.manageWorkerLifecycle
+      ? { discardOnError: true, idleTimeoutMs: V4_OCR_IDLE_TIMEOUT_MS }
+      : {},
   );
 }
 
@@ -308,6 +326,14 @@ async function recognizePreparedTooltip(
       fallbackParsed.diagnostics = ["整块 OCR 兜底被采用", ...parsed.diagnostics, ...fallbackParsed.diagnostics];
       parsed = fallbackParsed;
     }
+  }
+  parsed.tooltipImageUrl = prepared.tooltipImageUrl;
+  parsed.tooltipCropReason = prepared.tooltipCropReason;
+  if (prepared.captureTooltipCrop && !prepared.tooltipImageUrl) {
+    parsed.warnings = [...new Set([
+      ...parsed.warnings,
+      prepared.tooltipCropReason ?? "未找到可靠的 tooltip 边界，完整截图不会被保存",
+    ])];
   }
   return parsed;
 }
@@ -535,22 +561,52 @@ function qualityScore(parsed: ParsedAccessoryV4 | undefined): number {
   return accepted / Math.max(fields.length, 1) * 0.7 + confidence * 0.2 + Math.min(parsed.accessory.affixes.length, 4) * 0.025;
 }
 
-function prepareTooltip(bitmap: ImageBitmap, profile: Exclude<OcrProfile, "unknown">): PreparedTooltip {
-  const crop = profile === "minecraft-1.21.8" ? findMinecraftTooltipCrop(bitmap) : findModernContentCrop(bitmap);
-  const working = renderWorkingCanvas(bitmap, crop, profile === "minecraft-1.21.8" ? 3 : 2, profile);
+function prepareTooltip(
+  bitmap: ImageBitmap,
+  profile: Exclude<OcrProfile, "unknown">,
+  captureTooltipCrop = false,
+): PreparedTooltip {
+  const cropDetection = profile === "minecraft-1.21.8"
+    ? findMinecraftTooltipCrop(bitmap)
+    : findModernContentCrop(bitmap);
+  const crop = cropDetection.rect;
+  const scale = profile === "minecraft-1.21.8" ? 3 : 2;
+  const working = renderWorkingCanvas(bitmap, crop, scale, profile);
   const lineRects = findTextLineRects(working, profile);
+  const persistentCrop = captureTooltipCrop && cropDetection.detected
+    ? derivePersistentTooltipCrop(crop, working, lineRects, scale)
+    : null;
+  const cropValidation = persistentCrop
+    ? validatePersistentTooltipCrop(bitmap, persistentCrop, profile)
+    : { safe: false, reason: undefined };
+  const tooltipImageUrl = persistentCrop && cropValidation.safe
+    ? renderOriginalCropPng(bitmap, persistentCrop)
+    : undefined;
+  const tooltipCropReason = !captureTooltipCrop || tooltipImageUrl
+    ? undefined
+    : cropDetection.reason
+      ?? cropValidation.reason
+      ?? (lineRects.length === 0
+        ? "未检测到 tooltip 文字行"
+        : "未找到从饰品名称到最后一条词条的可靠边界");
   const fullRect = { x: 0, y: 0, width: working.width, height: working.height };
   const fallbackImages = renderVariants(working, fullRect, profile, "text");
   if (lineRects.length === 0) {
     return {
       profile,
       fallbackImages,
+      captureTooltipCrop,
+      tooltipImageUrl,
+      tooltipCropReason,
       lines: [{ kind: "title", textImages: fallbackImages, titleNumericImages: [], affixNumericImages: [], y: 0 }],
     };
   }
   return {
     profile,
     fallbackImages,
+    captureTooltipCrop,
+    tooltipImageUrl,
+    tooltipCropReason,
     lines: lineRects.map((rect, index) => {
       const kind = classifyLine(index, rect, lineRects);
       const titleNumericRect = index <= 2 ? findNumericRect(working, rect, true) : null;
@@ -577,6 +633,152 @@ function prepareTooltip(bitmap: ImageBitmap, profile: Exclude<OcrProfile, "unkno
       };
     }),
   };
+}
+
+function validatePersistentTooltipCrop(
+  bitmap: ImageBitmap,
+  rect: Rect,
+  profile: Exclude<OcrProfile, "unknown">,
+): { safe: boolean; reason?: string } {
+  if (rect.width > 900 || rect.height > 600) {
+    return { safe: false, reason: "候选裁剪范围过大，可能包含背包、聊天或其他游戏画面" };
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.floor(rect.width));
+  canvas.height = Math.max(1, Math.floor(rect.height));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return { safe: false, reason: "浏览器无法验证 tooltip 裁剪内容" };
+  context.drawImage(
+    bitmap,
+    Math.floor(rect.x),
+    Math.floor(rect.y),
+    canvas.width,
+    canvas.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let sampled = 0;
+  let background = 0;
+  for (let y = 0; y < canvas.height; y += 2) {
+    for (let x = 0; x < canvas.width; x += 2) {
+      const offset = (y * canvas.width + x) * 4;
+      const r = pixels[offset];
+      const g = pixels[offset + 1];
+      const b = pixels[offset + 2];
+      sampled += 1;
+      if (profile === "minecraft-1.21.8"
+        ? isTooltipBackground(r, g, b)
+        : Math.max(r, g, b) <= 72) {
+        background += 1;
+      }
+    }
+  }
+  const ratio = background / Math.max(sampled, 1);
+  const minimum = profile === "minecraft-1.21.8" ? 0.42 : 0.5;
+  if (ratio < minimum) {
+    return {
+      safe: false,
+      reason: `候选区域的深色 tooltip 背景占比仅 ${formatPercent(ratio)}，不会保存完整截图`,
+    };
+  }
+  return { safe: true };
+}
+
+function derivePersistentTooltipCrop(
+  sourceCrop: Rect,
+  working: HTMLCanvasElement,
+  lineRects: Rect[],
+  scale: number,
+): Rect | null {
+  if (lineRects.length < 2) return null;
+  const title = lineRects[0];
+  const affixLines = lineRects.slice(1).filter((line) => {
+    if (!isPlausiblePersistentAffixGeometry(line.width, line.height)) return false;
+    const numericRect = findNumericRect(working, line, false);
+    return Boolean(
+      numericRect
+      && isRightSideNumericRect(working, line, numericRect)
+      && hasColoredAffixPixels(working, line, numericRect.x),
+    );
+  });
+  const lastAffix = affixLines[affixLines.length - 1];
+  if (!lastAffix) return null;
+
+  const topPadding = 3;
+  const bottomPadding = 4;
+  const relativeTop = Math.max(0, Math.floor(title.y / scale) - topPadding);
+  const relativeBottom = Math.min(
+    sourceCrop.height,
+    Math.ceil((lastAffix.y + lastAffix.height) / scale) + bottomPadding,
+  );
+  if (relativeBottom <= relativeTop) return null;
+  return {
+    x: sourceCrop.x,
+    y: sourceCrop.y + relativeTop,
+    width: sourceCrop.width,
+    height: relativeBottom - relativeTop,
+  };
+}
+
+export function isPlausiblePersistentAffixGeometry(width: number, height: number): boolean {
+  return width / Math.max(height, 1) <= 20;
+}
+
+function isRightSideNumericRect(canvas: HTMLCanvasElement, line: Rect, numericRect: Rect): boolean {
+  const numericCenter = numericRect.x + numericRect.width / 2;
+  const relativePosition = (numericCenter - line.x) / Math.max(line.width, 1);
+  return relativePosition >= 0.48 && numericCenter >= canvas.width * 0.28;
+}
+
+function hasColoredAffixPixels(canvas: HTMLCanvasElement, line: Rect, rightBoundary: number): boolean {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+  const safeInset = Math.max(12, Math.round(canvas.width * 0.02));
+  const x = Math.max(safeInset, Math.floor(line.x));
+  const y = Math.max(0, Math.floor(line.y));
+  const lineRight = Math.min(canvas.width, Math.ceil(line.x + line.width));
+  const scanRight = Math.min(lineRight, Math.floor(rightBoundary));
+  const width = Math.max(0, scanRight - x);
+  if (width < 1) return false;
+  const height = Math.max(1, Math.min(canvas.height - y, Math.ceil(line.height)));
+  const pixels = context.getImageData(x, y, width, height).data;
+  let colored = 0;
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * 4;
+    const r = pixels[offset];
+    const g = pixels[offset + 1];
+    const b = pixels[offset + 2];
+    const maximum = Math.max(r, g, b);
+    const minimum = Math.min(r, g, b);
+    if (maximum - minimum >= 45 && maximum >= 105) colored += 1;
+  }
+  return colored >= Math.max(8, Math.round(height * 0.35));
+}
+
+function renderOriginalCropPng(bitmap: ImageBitmap, rect: Rect): string | undefined {
+  if (rect.width < 2 || rect.height < 2) return undefined;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.floor(rect.width));
+  canvas.height = Math.max(1, Math.floor(rect.height));
+  const context = canvas.getContext("2d");
+  if (!context) return undefined;
+  context.imageSmoothingEnabled = false;
+  context.drawImage(
+    bitmap,
+    Math.floor(rect.x),
+    Math.floor(rect.y),
+    canvas.width,
+    canvas.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  const result = canvas.toDataURL("image/png");
+  return result.startsWith("data:image/png;base64,") ? result : undefined;
 }
 
 function reclassifyRecognizedLines(lines: OcrLine[]): OcrLine[] {
@@ -896,12 +1098,14 @@ function findNumericRect(canvas: HTMLCanvasElement, line: Rect, title: boolean):
   };
 }
 
-function findMinecraftTooltipCrop(bitmap: ImageBitmap): Rect {
+function findMinecraftTooltipCrop(bitmap: ImageBitmap): CropDetection {
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return fullBitmapRect(bitmap);
+  if (!context) {
+    return { rect: fullBitmapRect(bitmap), detected: false, reason: "浏览器无法读取截图像素" };
+  }
   context.drawImage(bitmap, 0, 0);
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
   const leftLimit = findTooltipLeftEdge(image.data, canvas.width, canvas.height);
@@ -916,7 +1120,7 @@ function findMinecraftTooltipCrop(bitmap: ImageBitmap): Rect {
       const r = image.data[offset];
       const g = image.data[offset + 1];
       const b = image.data[offset + 2];
-      if (!isTooltipBackground(r, g, b) && !isMinecraftTextPixel(r, g, b)) continue;
+      if (!isTooltipBackground(r, g, b)) continue;
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x);
@@ -924,27 +1128,49 @@ function findMinecraftTooltipCrop(bitmap: ImageBitmap): Rect {
       hits += 1;
     }
   }
-  if (hits < 50 || maxX <= minX || maxY <= minY) return fullBitmapRect(bitmap);
+  if (hits < 50 || maxX <= minX || maxY <= minY) {
+    return { rect: fullBitmapRect(bitmap), detected: false, reason: "未检测到原版深色 tooltip 信息框" };
+  }
   const pad = 4;
   const x = Math.max(0, minX + 1);
   const y = Math.max(0, minY - pad);
   return {
-    x,
-    y,
-    width: Math.min(bitmap.width - x, maxX - x + pad),
-    height: Math.min(bitmap.height - y, maxY - minY + pad * 2),
+    detected: true,
+    rect: {
+      x,
+      y,
+      width: Math.min(bitmap.width - x, maxX - x + pad),
+      height: Math.min(bitmap.height - y, maxY - minY + pad * 2),
+    },
   };
 }
 
-function findModernContentCrop(bitmap: ImageBitmap): Rect {
+function findModernContentCrop(bitmap: ImageBitmap): CropDetection {
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return fullBitmapRect(bitmap);
+  if (!context) {
+    return { rect: fullBitmapRect(bitmap), detected: false, reason: "浏览器无法读取截图像素" };
+  }
   context.drawImage(bitmap, 0, 0);
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
-  return boundingRectForPixels(image.data, canvas.width, canvas.height, isModernTextPixel, 30, fullBitmapRect(bitmap));
+  const fallback = fullBitmapRect(bitmap);
+  const rect = boundingRectForPixels(image.data, canvas.width, canvas.height, isModernTextPixel, 30, fallback);
+  const tightlyFramedInput = bitmap.width <= 900 && bitmap.height <= 600;
+  const detected = !sameRect(rect, fallback) || tightlyFramedInput;
+  return {
+    rect,
+    detected,
+    reason: detected ? undefined : "未检测到 ModernUI tooltip 的完整文字区域",
+  };
+}
+
+function sameRect(left: Rect, right: Rect): boolean {
+  return left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height;
 }
 
 function boundingRectForPixels(

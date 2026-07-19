@@ -6,6 +6,8 @@
 
 面向 simMC 旅行猎手玩法的离线饰品 OCR、仓库管理与剑/弓最优配装计算工具。推荐使用 **v4**，Windows 与 Android 在同一个 Release 发布。
 
+> `v5` Windows 版目前处于内部候选测试阶段，尚未创建标签或 Release。下方稳定下载链接仍固定指向 v4。
+
 ## 下载与安装
 
 | 平台 | 最新版本 | 直接下载 |
@@ -53,6 +55,7 @@ Windows v4 会把已确认饰品和截图保存在工具目录的 `data/accessor
 
 | 版本 | 状态 | 说明 |
 | --- | --- | --- |
+| v5 | 内部 Windows 候选，未发布 | 仅持久化原色 tooltip 裁剪和已确认词条；强化本地服务、CSP、离线扫描和 OCR Worker 回收 |
 | v4 | 推荐，Windows/Android | 双字体 OCR、字段级置信度、持久化饰品库、剑/弓最优配装 |
 | v3 | 历史稳定版 | 仓库式流程和目录持久化，使用旧 OCR 内核 |
 | v3-old | 历史版 | 仓库式流程，不保存已确认饰品 |
@@ -76,6 +79,7 @@ Windows v4 会把已确认饰品和截图保存在工具目录的 `data/accessor
 npm ci
 npm test
 npm run build:v4
+npm run build:v5
 npm run build:android:v4
 npm run dev:v4
 ```
@@ -84,9 +88,13 @@ npm run dev:v4
 
 ## 隐私与数据
 
-- 工具不上传截图、OCR 文本或饰品数据。
+- MurphyPotato 制作的非官方玩家工具。玩家发行包运行时不收集、上传或向作者传输个人信息、截图、配装数据或设备标识，也不主动连接非本地服务器。
+- Windows 仅使用 `127.0.0.1` 本机服务，Android 不申请联网权限。操作系统、浏览器及用户自行启用的系统备份行为由用户设备设置决定，不属于工具主动通信。源码构建过程可能联网下载公开依赖。
+- v5 复核期间原截图只保留在页面内存中；确认入库后只保存从饰品名称到最后一条词条的原色 PNG tooltip 裁剪，裁剪失败时不会静默保存完整原图。
 - 仓库不包含真实测试截图、玩家饰品库、Minecraft/ModernUI JAR 或本机字体缓存。
 - Windows ZIP 与 Android APK 的校验值见 [SHA256SUMS](checksums/SHA256SUMS.txt)。
+
+详细边界和离线策略见 [隐私与离线说明](docs/PRIVACY_AND_OFFLINE.md)。v5 候选状态见 [v5 RC 状态](docs/V5_RC_STATUS.md)。
 
 ## License
 

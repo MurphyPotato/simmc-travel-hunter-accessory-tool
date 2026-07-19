@@ -1,6 +1,8 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Check,
+  CircleHelp,
   ClipboardPaste,
   ImageUp,
   Plus,
@@ -9,6 +11,7 @@ import {
   Target,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import {
   Accessory,
@@ -31,6 +34,7 @@ import {
   weaponLabels,
 } from "./domain";
 import { recognizeAccessoryImageV4 } from "./ocrV4";
+import { terminateV4OcrWorkers } from "./ocrV4WorkerPool";
 import { OcrFieldResult, OcrProfile, OcrReviewFields, ParsedAccessoryV4 } from "./ocrV4Types";
 import {
   accessoryStorageLocation,
@@ -38,6 +42,12 @@ import {
   saveAccessoryPoolToFile,
   sanitizeAccessories,
 } from "./v4Storage";
+import {
+  accessoryStorageLocationV5,
+  loadAccessoryPoolV5,
+  sanitizeAccessoriesV5,
+  saveAccessoryPoolV5,
+} from "./v5Storage";
 import { APP_VERSION } from "./appConfig";
 
 type RecognitionStatus = "queued" | "recognizing" | "ready" | "error";
@@ -66,8 +76,12 @@ interface SwapLogEntry {
 }
 
 type StorageStatus = "loading" | "ready" | "saving" | "error";
-const hasFileStorage = APP_VERSION === "v4";
-const storageLocation = accessoryStorageLocation();
+const isV5 = APP_VERSION === "v5";
+const hasFileStorage = APP_VERSION === "v4" || isV5;
+const storageLocation = isV5 ? accessoryStorageLocationV5() : accessoryStorageLocation();
+const loadAccessoryPool = isV5 ? loadAccessoryPoolV5 : loadAccessoryPoolFromFile;
+const saveAccessoryPool = isV5 ? saveAccessoryPoolV5 : saveAccessoryPoolToFile;
+const sanitizeAccessoryPool = isV5 ? sanitizeAccessoriesV5 : sanitizeAccessories;
 
 function AppV4() {
   const [recognitionItems, setRecognitionItems] = useState<RecognitionItem[]>([]);
@@ -80,9 +94,12 @@ function AppV4() {
   const [storageMessage, setStorageMessage] = useState(
     hasFileStorage ? `正在读取${storageLocation}` : "",
   );
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const poolLoadedRef = useRef(false);
   const storageAvailableRef = useRef(false);
+  const previousPlansRef = useRef<ComputedPlans | null>(null);
 
   const activeEvaluation = plans?.[activePlan] ?? null;
   const usageById = useMemo(() => buildUsageMap(plans), [plans]);
@@ -102,7 +119,7 @@ function AppV4() {
       return;
     }
     let cancelled = false;
-    void loadAccessoryPoolFromFile().then((result) => {
+    void loadAccessoryPool().then((result) => {
       if (cancelled) return;
       poolLoadedRef.current = true;
       storageAvailableRef.current = result.ok;
@@ -125,7 +142,7 @@ function AppV4() {
     if (!hasFileStorage || !poolLoadedRef.current || !storageAvailableRef.current) return;
     const handle = window.setTimeout(() => {
       setStorageStatus("saving");
-      void saveAccessoryPoolToFile(pool).then((result) => {
+      void saveAccessoryPool(pool).then((result) => {
         if (result.ok) {
           setStorageStatus("ready");
           setStorageMessage(`已保存 ${pool.length} 件饰品到${storageLocation}。`);
@@ -137,6 +154,18 @@ function AppV4() {
     }, 250);
     return () => window.clearTimeout(handle);
   }, [pool]);
+
+  useEffect(() => {
+    if (!isV5) return;
+    const releaseWorkers = () => {
+      void terminateV4OcrWorkers();
+    };
+    window.addEventListener("pagehide", releaseWorkers);
+    return () => {
+      window.removeEventListener("pagehide", releaseWorkers);
+      releaseWorkers();
+    };
+  }, []);
 
   useEffect(() => {
     function onPaste(event: ClipboardEvent) {
@@ -184,7 +213,10 @@ function AppV4() {
         patchRecognition(id, {
           progress: `${progress.status} ${Math.round(progress.progress * 100)}%`,
         });
-      }, forcedProfile);
+      }, forcedProfile, {
+        captureTooltipCrop: isV5,
+        manageWorkerLifecycle: isV5,
+      });
       patchRecognition(id, {
         status: "ready",
         progress: "识别完成，等待复核",
@@ -192,7 +224,11 @@ function AppV4() {
           ...parsed,
           accessory: {
             ...parsed.accessory,
-            imageUrl,
+            ...(isV5
+              ? parsed.tooltipImageUrl
+                ? { imageUrl: parsed.tooltipImageUrl, imageKind: "tooltip-crop" as const }
+                : { imageUrl: undefined, imageKind: undefined }
+              : { imageUrl }),
           },
         },
       });
@@ -204,7 +240,7 @@ function AppV4() {
         parsed: {
           rawText: "",
           warnings: ["OCR 识别失败，请手动补全。"],
-          accessory: createBlankEditableAccessory(imageUrl),
+          accessory: createBlankEditableAccessory(isV5 ? undefined : imageUrl),
           profile: forcedProfile ?? "unknown",
           profileConfidence: 0,
           profileReasons: ["OCR 识别失败"],
@@ -247,33 +283,66 @@ function AppV4() {
     void runOcrForItem(item.id, item.file, item.imageUrl, profile);
   }
 
-  function confirmRecognition(item: RecognitionItem) {
+  function confirmRecognition(item: RecognitionItem, saveWithoutImage = false) {
     if (!item.parsed) return;
+    if (isV5 && !item.parsed.tooltipImageUrl && !saveWithoutImage) return;
+    const { imageUrl: _ignoredImageUrl, imageKind: _ignoredImageKind, ...accessoryWithoutImage } = item.parsed.accessory;
     const accessory = {
-      ...item.parsed.accessory,
+      ...accessoryWithoutImage,
       id: newId(),
       source: "ocr" as const,
+      ...(isV5
+        ? !saveWithoutImage && item.parsed.tooltipImageUrl
+          ? { imageUrl: item.parsed.tooltipImageUrl, imageKind: "tooltip-crop" as const }
+          : {}
+        : item.imageUrl
+          ? { imageUrl: item.imageUrl }
+          : {}),
     };
-    setPool((previous) => sanitizeAccessories([accessory, ...previous]));
+    setPool((previous) => sanitizeAccessoryPool([accessory, ...previous]));
     setRecognitionItems((previous) => previous.filter((current) => current.id !== item.id));
     setPlans(null);
     setSwapLog([]);
   }
 
   function calculatePlans() {
-    const previous = plans;
+    const previous = isV5 ? previousPlansRef.current : plans;
     const next: ComputedPlans = {
       bow: findBestSetFromPool(pool, "bow"),
       sword: findBestSetFromPool(pool, "sword"),
     };
+    if (isV5) previousPlansRef.current = next;
     setPlans(next);
     setSwapLog(buildSwapLog(previous, next));
   }
 
-  function clearPool() {
+  async function clearPool() {
+    setClearConfirmOpen(false);
     setPool([]);
+    previousPlansRef.current = null;
     setPlans(null);
     setSwapLog([]);
+    if (isV5 && storageAvailableRef.current) {
+      setStorageStatus("saving");
+      const result = await saveAccessoryPoolV5([]);
+      if (result.ok) {
+        setStorageStatus("ready");
+        setStorageMessage(`已清空并写入${storageLocation}。`);
+      } else {
+        setStorageStatus("error");
+        setStorageMessage(`清空写入失败：${result.error ?? "无法写入工具目录"}`);
+      }
+    }
+  }
+
+  function removeRecognitionItem(id: string) {
+    if (isV5 && recognitionItems.length <= 1) void terminateV4OcrWorkers();
+    setRecognitionItems((previous) => previous.filter((current) => current.id !== id));
+  }
+
+  function clearRecognitionQueue() {
+    setRecognitionItems([]);
+    void terminateV4OcrWorkers();
   }
 
   function removePoolItem(id: string) {
@@ -300,11 +369,20 @@ function AppV4() {
     <main className="appShell v3Shell">
       <header className="v3Top">
         <div>
-          <h1>旅行猎手饰品仓库 v4</h1>
-          <p>自动区分 1.21.8 原版字体与 ModernUI；冲突字段标红复核后再计算最优剑套和弓套。</p>
+          <h1>旅行猎手饰品仓库 {isV5 ? "v5" : "v4"}</h1>
+          <p>{isV5
+            ? "只保存原色 tooltip 裁剪和已确认词条；原始截图在复核结束后释放。"
+            : "自动区分 1.21.8 原版字体与 ModernUI；冲突字段标红复核后再计算最优剑套和弓套。"}</p>
+          {isV5 && <span className="unofficialMark">MurphyPotato 制作 · 非官方玩家工具</span>}
         </div>
         <div className="topActions">
           {hasFileStorage && <StorageBadge status={storageStatus} message={storageMessage} />}
+          {isV5 && (
+            <button className="ghostButton" type="button" onClick={() => setAboutOpen(true)}>
+              <CircleHelp size={16} />
+              关于
+            </button>
+          )}
           <button
             className="primaryButton"
             type="button"
@@ -342,7 +420,17 @@ function AppV4() {
 
       <div className="v3Grid">
         <section className="panel v3Panel">
-          <PanelTitle title="待识别饰品库" desc={`${recognitionItems.length} 张截图等待复核`} />
+          {isV5 ? (
+            <div className="panelHeader">
+              <PanelTitle title="待识别饰品库" desc={`${recognitionItems.length} 张截图等待复核`} />
+              <button className="ghostButton" type="button" onClick={clearRecognitionQueue} disabled={recognitionItems.length === 0}>
+                <Trash2 size={16} />
+                清空待识别
+              </button>
+            </div>
+          ) : (
+            <PanelTitle title="待识别饰品库" desc={`${recognitionItems.length} 张截图等待复核`} />
+          )}
           {recognitionItems.length === 0 ? (
             <EmptyLine text="还没有待识别截图。直接 Ctrl+V 或点“选择图片”导入。" />
           ) : (
@@ -351,9 +439,10 @@ function AppV4() {
                 <ReviewCard
                   key={item.id}
                   item={item}
+                  v5={isV5}
                   onChange={(next, fields) => updateParsedAccessory(item.id, next, fields)}
-                  onConfirm={() => confirmRecognition(item)}
-                  onRemove={() => setRecognitionItems((previous) => previous.filter((current) => current.id !== item.id))}
+                  onConfirm={(saveWithoutImage) => confirmRecognition(item, saveWithoutImage)}
+                  onRemove={() => removeRecognitionItem(item.id)}
                   onRetry={(profile) => retryRecognition(item, profile)}
                 />
               ))}
@@ -364,7 +453,12 @@ function AppV4() {
         <section className="panel v3Panel">
           <div className="panelHeader">
             <PanelTitle title="待选饰品库" desc={`${pool.length} 件已确认饰品`} />
-            <button className="ghostButton" type="button" onClick={clearPool} disabled={pool.length === 0}>
+            <button
+              className="ghostButton"
+              type="button"
+              onClick={() => isV5 ? setClearConfirmOpen(true) : void clearPool()}
+              disabled={pool.length === 0}
+            >
               <Trash2 size={16} />
               清空
             </button>
@@ -417,20 +511,30 @@ function AppV4() {
           <SwapLog entries={swapLog} />
         </section>
       </div>
+      {isV5 && aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      {isV5 && clearConfirmOpen && (
+        <ConfirmClearDialog
+          count={pool.length}
+          onCancel={() => setClearConfirmOpen(false)}
+          onConfirm={() => void clearPool()}
+        />
+      )}
     </main>
   );
 }
 
 function ReviewCard({
   item,
+  v5,
   onChange,
   onConfirm,
   onRemove,
   onRetry,
 }: {
   item: RecognitionItem;
+  v5: boolean;
   onChange: (accessory: Accessory, fields: OcrReviewFields) => void;
-  onConfirm: () => void;
+  onConfirm: (saveWithoutImage: boolean) => void;
   onRemove: () => void;
   onRetry: (profile: Exclude<OcrProfile, "unknown">) => void;
 }) {
@@ -446,7 +550,22 @@ function ReviewCard({
           <Trash2 size={15} />
         </button>
       </div>
-      <img className="tooltipPreview large" src={item.imageUrl} alt={item.fileName} />
+      {v5 ? (
+        <div className="reviewImageGrid">
+          <figure>
+            <figcaption>复核原截图 · 不写入饰品库</figcaption>
+            <img className="tooltipPreview large" src={item.imageUrl} alt={item.fileName} />
+          </figure>
+          <figure className={item.parsed?.tooltipImageUrl ? "" : "cropMissing"}>
+            <figcaption>确认后保存的 tooltip 裁剪</figcaption>
+            {item.parsed?.tooltipImageUrl
+              ? <img className="tooltipPreview large" src={item.parsed.tooltipImageUrl} alt="原色 tooltip 裁剪" />
+              : <div className="cropPlaceholder"><AlertTriangle size={18} />{item.parsed?.tooltipCropReason ?? "等待 OCR 定位 tooltip"}</div>}
+          </figure>
+        </div>
+      ) : (
+        <img className="tooltipPreview large" src={item.imageUrl} alt={item.fileName} />
+      )}
       {item.error && <div className="ocrStatus error">{item.error}</div>}
       {accessory ? (
         <>
@@ -468,10 +587,26 @@ function ReviewCard({
             <summary>原始 OCR 文本</summary>
             <pre>{item.parsed?.rawText || "无 OCR 文本，可手动填写。"}</pre>
           </details>
-          <button className="primaryButton fullWidth" type="button" onClick={onConfirm}>
+          {v5 && !item.parsed?.tooltipImageUrl && (
+            <div className="cropFailureNotice">
+              <AlertTriangle size={17} />
+              <span>裁剪未通过安全检查。请删除后重新截图，或只保存已复核词条；完整原图不会写入文件。</span>
+            </div>
+          )}
+          <button
+            className="primaryButton fullWidth"
+            type="button"
+            onClick={() => onConfirm(false)}
+            disabled={v5 && !item.parsed?.tooltipImageUrl}
+          >
             <Check size={16} />
-            确认饰品
+            {v5 ? "确认饰品并保存 tooltip" : "确认饰品"}
           </button>
+          {v5 && !item.parsed?.tooltipImageUrl && (
+            <button className="ghostButton fullWidth" type="button" onClick={() => onConfirm(true)}>
+              仅保存词条
+            </button>
+          )}
         </>
       ) : (
         <EmptyLine text="OCR 识别中..." />
@@ -702,6 +837,7 @@ function PoolCard({
           </button>
         </div>
         <UsageBadge usage={usage} />
+        {isV5 && !accessory.imageUrl && <em className="noImageBadge">仅词条，无截图</em>}
         <AffixSummary affixes={accessory.affixes} />
         <div className="miniMetrics">
           <span>弓 {formatNumber(scoreBow, 2)}</span>
@@ -772,6 +908,7 @@ function PlanSlot({ slot, item }: { slot: AccessorySlot; item: Accessory }) {
         <span>{slotLabels[slot]}</span>
         <strong>{item.name || qualityLabels[item.quality]}</strong>
         <em>{item.source === "blank" ? "空白占位" : `${qualityLabels[item.quality]} +${item.level}`}</em>
+        {isV5 && item.source !== "blank" && !item.imageUrl && <em className="noImageBadge">仅词条，无截图</em>}
         {item.source !== "blank" && <AffixSummary affixes={item.affixes} />}
       </div>
     </div>
@@ -801,12 +938,25 @@ function SwapLog({ entries }: { entries: SwapLogEntry[] }) {
 }
 
 function SwapItem({ item, fallback }: { item?: Accessory; fallback: string }) {
-  if (!item) return <span>{fallback}</span>;
+  if (!item) return isV5 ? <div className="swapItem emptySwapItem">{fallback}</div> : <span>{fallback}</span>;
+  if (!isV5) {
+    return (
+      <span className="swapItem">
+        {item.imageUrl && <img src={item.imageUrl} alt={item.name || fallback} />}
+        <b>{item.name || qualityLabels[item.quality]}</b>
+      </span>
+    );
+  }
   return (
-    <span className="swapItem">
+    <div className="swapItem">
       {item.imageUrl && <img src={item.imageUrl} alt={item.name || fallback} />}
-      <b>{item.name || qualityLabels[item.quality]}</b>
-    </span>
+      <div className="swapItemDetails">
+        <b>{item.name || qualityLabels[item.quality]}</b>
+        <small>{slotLabels[item.slot]} / {qualityLabels[item.quality]} +{item.level}</small>
+        {!item.imageUrl && <em className="noImageBadge">仅词条，无截图</em>}
+        <AffixSummary affixes={item.affixes} />
+      </div>
+    </div>
   );
 }
 
@@ -825,6 +975,65 @@ function EmptyLine({ text }: { text: string }) {
 
 function StorageBadge({ status, message }: { status: StorageStatus; message: string }) {
   return <span className={`storageBadge ${status}`}>{message}</span>;
+}
+
+function AboutDialog({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="modalBackdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className="aboutDialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
+        <header>
+          <div>
+            <h2 id="about-title">关于旅行猎手饰品仓库 v5</h2>
+            <span>MurphyPotato 制作 · 非官方玩家工具</span>
+          </div>
+          <button className="iconButton" type="button" onClick={onClose} title="关闭关于窗口" aria-label="关闭关于窗口">
+            <X size={17} />
+          </button>
+        </header>
+        <div className="aboutContent">
+          <p>MurphyPotato 制作的非官方玩家工具。玩家发行包运行时不收集、上传或向作者传输个人信息、截图、配装数据或设备标识，也不主动连接非本地服务器。</p>
+          <p>Windows 仅使用 <code>127.0.0.1</code> 本机服务，Android 不申请联网权限。操作系统、浏览器及用户自行启用的系统备份行为由用户设备设置决定，不属于工具主动通信。</p>
+          <p>复核期间原截图只保留在当前页面内存中。确认入库后仅保存从饰品名称到最后一条词条的原色 PNG tooltip 裁剪；也可选择仅保存词条。</p>
+          <p>源码构建过程可能联网下载公开依赖。本项目与 simMC、Mojang Studios 或 Microsoft 无官方关联。</p>
+        </div>
+        <button className="primaryButton fullWidth" type="button" onClick={onClose}>关闭</button>
+      </section>
+    </div>
+  );
+}
+
+function ConfirmClearDialog({
+  count,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <section className="confirmDialog" role="alertdialog" aria-modal="true" aria-labelledby="clear-title">
+        <AlertTriangle size={24} />
+        <h2 id="clear-title">清空全部已确认饰品？</h2>
+        <p>将删除 {count} 件饰品，并立即把 <code>data/accessories-v5.json</code> 写为空库。此操作无法撤销。</p>
+        <div className="dialogActions">
+          <button className="ghostButton" type="button" onClick={onCancel}>取消</button>
+          <button className="primaryButton dangerButton" type="button" onClick={onConfirm}>确认清空</button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function acceptedField<T>(value: T): OcrFieldResult<T> {
@@ -889,7 +1098,7 @@ function profileDisplayName(profile: OcrProfile): string {
   return "字体类型未确定";
 }
 
-function createBlankEditableAccessory(imageUrl: string): Accessory {
+function createBlankEditableAccessory(imageUrl?: string): Accessory {
   return {
     id: newId(),
     name: "手动复核饰品",
@@ -898,7 +1107,7 @@ function createBlankEditableAccessory(imageUrl: string): Accessory {
     level: 0,
     affixes: [],
     source: "ocr",
-    imageUrl,
+    ...(imageUrl ? { imageUrl } : {}),
   };
 }
 

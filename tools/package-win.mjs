@@ -10,17 +10,18 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { assertOfflineRuntime } from "./assert-offline-runtime.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const releaseRoot = join(root, "release");
 const nodeExe = findNodeExe();
 const requestedVersion = process.argv[2];
-const packageVersions = ["v1", "v2", "v3-old", "v3", "v4"];
-const persistentVersions = new Set(["v3", "v4"]);
+const packageVersions = ["v1", "v2", "v3-old", "v3", "v4", "v5"];
+const persistentVersions = new Set(["v3", "v4", "v5"]);
 const versions = requestedVersion ? [requestedVersion] : packageVersions;
 
 if (!versions.every((version) => packageVersions.includes(version))) {
-  throw new Error("Usage: node tools/package-win.mjs [v1|v2|v3-old|v3|v4]");
+  throw new Error("Usage: node tools/package-win.mjs [v1|v2|v3-old|v3|v4|v5]");
 }
 
 mkdirSync(releaseRoot, { recursive: true });
@@ -30,7 +31,9 @@ for (const version of versions) {
 }
 
 for (const version of versions) {
-  const packageName = `travel-hunter-accessory-tool-${version}-win`;
+  const packageName = version === "v5"
+    ? "travel-hunter-accessory-tool-v5-win-rc1"
+    : `travel-hunter-accessory-tool-${version}-win`;
   const packageDir = join(releaseRoot, packageName);
   rmSync(packageDir, { recursive: true, force: true });
   mkdirSync(packageDir, { recursive: true });
@@ -53,6 +56,9 @@ for (const version of versions) {
   writeFileSync(join(packageDir, "使用说明.txt"), readmeSource(version), "utf8");
 
   assertNoRemoteOcr(packageDir);
+  if (version === "v5") {
+    assertOfflineRuntime([join(packageDir, "app"), join(packageDir, "server.mjs")]);
+  }
   zipPackage(packageName);
 }
 
@@ -148,15 +154,23 @@ function readmeSource(version) {
         ? "v3 是仓库式新版：上传或粘贴饰品截图，复核后入库，再点击“计算并替换”。"
       : version === "v4"
         ? "v4 是双字体混合 OCR 版：自动识别原版像素字体与 ModernUI 思源黑体，冲突字段会标红复核。"
+      : version === "v5"
+        ? "v5 是内部候选版：只保存原色 tooltip 裁剪和已确认词条，完整原截图不会写入饰品库。"
       : "v1 是基础版，不包含教程弹窗。";
   const storageLine =
     version === "v3"
       ? "- v3 已确认入库的饰品会保存在本工具目录 data/accessories-v3.json。\n"
       : version === "v4"
         ? "- v4 已确认入库的饰品会保存在本工具目录 data/accessories-v4.json。\n"
+      : version === "v5"
+        ? "- v5 已确认入库的饰品会保存在本工具目录 data/accessories-v5.json。\n- v5 与 v4 数据完全隔离，不会读取或迁移旧饰品库。\n"
       : version === "v3-old"
         ? "- v3-old 不保存已确认饰品库，关闭或刷新后需要重新导入。\n"
         : "";
+  const privacyLines = version === "v5"
+    ? "- MurphyPotato 制作的非官方玩家工具。玩家发行包运行时不收集、上传或向作者传输个人信息、截图、配装数据或设备标识，也不主动连接非本地服务器。\n- Windows 仅使用 127.0.0.1 本机服务，Android 不申请联网权限；系统、浏览器及用户自行启用的备份行为由用户设备设置决定，不属于工具主动通信。\n"
+    : "";
+  const extraLines = `${storageLine}${privacyLines}`;
   return `旅行猎手饰品对比工具 ${version}
 
 使用方法：
@@ -171,12 +185,17 @@ ${tutorialLine}
 说明：
 - 工具完全离线运行。
 - OCR 识别资源已经包含在包内，不需要玩家安装 Node 或 npm。
-${storageLine.trimEnd()}
+${extraLines.trimEnd()}
 - 如果浏览器没有自动打开，请看启动窗口里显示的 http://127.0.0.1:端口 地址，手动复制到浏览器打开。
 `;
 }
 
 function serverSource(version) {
+  if (version === "v5") return secureV5ServerSource();
+  return legacyServerSource(version);
+}
+
+function legacyServerSource(version) {
   const storeEnabled = persistentVersions.has(version);
   const storeVersion = storeEnabled ? version : "v3";
   return `import { createServer } from "node:http";
@@ -292,6 +311,218 @@ server.listen(0, "127.0.0.1", () => {
   if (process.env.TRAVEL_HUNTER_NO_OPEN !== "1") {
     execFile("cmd", ["/c", "start", "", url]);
   }
+});
+`;
+}
+
+function secureV5ServerSource() {
+  return `import { createServer } from "node:http";
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+
+const root = resolve(fileURLToPath(new URL("./app/", import.meta.url)));
+const storePath = fileURLToPath(new URL("./data/accessories-v5.json", import.meta.url));
+const storeSchema = "travel-hunter-accessory-tool:v5/accessories";
+const contentSecurityPolicy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+const baseHeaders = {
+  "Content-Security-Policy": contentSecurityPolicy,
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), browsing-topics=()",
+  "X-Frame-Options": "DENY",
+};
+const mimeTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".wasm": "application/wasm",
+  ".gz": "application/gzip",
+  ".ico": "image/x-icon",
+};
+
+const server = createServer((request, response) => {
+  if (!validateLocalRequest(request, response)) return;
+
+  let url;
+  try {
+    url = new URL(request.url || "/", "http://" + request.headers.host);
+  } catch {
+    sendText(response, 400, "Bad Request");
+    return;
+  }
+
+  if (url.pathname === "/api/v5/accessories") {
+    handleAccessoryStore(request, response);
+    return;
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    writeHead(response, 405, { Allow: "GET, HEAD" });
+    response.end("Method Not Allowed");
+    return;
+  }
+
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(url.pathname);
+  } catch {
+    sendText(response, 400, "Bad Request");
+    return;
+  }
+  const requestedPath = decodedPath === "/" ? "/index.html" : decodedPath;
+  let filePath = resolve(root, "." + requestedPath.replaceAll("\\\\", "/"));
+  if (filePath !== root && !filePath.startsWith(root + sep)) {
+    sendText(response, 403, "Forbidden");
+    return;
+  }
+  if (!existsSync(filePath) || statSync(filePath).isDirectory()) filePath = resolve(root, "index.html");
+
+  const ext = extname(filePath).toLowerCase();
+  const isOcrRuntime = url.pathname.startsWith("/ocr/");
+  writeHead(response, 200, {
+    "Content-Type": mimeTypes[ext] || "application/octet-stream",
+    "Cache-Control": ext === ".html" || isOcrRuntime ? "no-store" : "public, max-age=3600",
+  });
+  if (request.method === "HEAD") response.end();
+  else createReadStream(filePath).pipe(response);
+});
+
+function validateLocalRequest(request, response) {
+  const host = request.headers.host || "";
+  if (!/^127\\.0\\.0\\.1:\\d+$/.test(host)) {
+    sendText(response, 421, "Local host required");
+    return false;
+  }
+  const expectedOrigin = "http://" + host;
+  const origin = request.headers.origin;
+  const fetchSite = request.headers["sec-fetch-site"];
+  if ((origin && origin !== expectedOrigin)
+    || (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none")) {
+    sendText(response, 403, "Cross-origin request blocked");
+    return false;
+  }
+  return true;
+}
+
+function handleAccessoryStore(request, response) {
+  if (request.method === "GET") {
+    writeHead(response, 200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    response.end(readAccessoryStore());
+    return;
+  }
+
+  if (request.method === "PUT") {
+    const host = request.headers.host || "";
+    const sameOrigin = request.headers.origin === "http://" + host
+      || request.headers["sec-fetch-site"] === "same-origin";
+    if (!sameOrigin) {
+      sendText(response, 403, "Same-origin write required");
+      return;
+    }
+    readRequestBody(request, 80 * 1024 * 1024)
+      .then((body) => {
+        const payload = validateStorePayload(JSON.parse(body));
+        mkdirSync(dirname(storePath), { recursive: true });
+        writeFileSync(storePath, JSON.stringify(payload), "utf8");
+        writeHead(response, 200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        response.end(JSON.stringify({ ok: true }));
+      })
+      .catch((error) => {
+        writeHead(response, 400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Bad request" }));
+      });
+    return;
+  }
+
+  writeHead(response, 405, { Allow: "GET, PUT" });
+  response.end("Method Not Allowed");
+}
+
+function validateStorePayload(payload) {
+  if (!payload || typeof payload !== "object"
+    || payload.schema !== storeSchema
+    || payload.version !== 1
+    || !Array.isArray(payload.accessories)) {
+    throw new Error("v5 饰品库 schema 不匹配");
+  }
+  for (const accessory of payload.accessories) {
+    if (!accessory || typeof accessory !== "object") throw new Error("无效的饰品数据");
+    if (accessory.imageUrl === undefined && accessory.imageKind === undefined) continue;
+    if (accessory.imageKind !== "tooltip-crop"
+      || typeof accessory.imageUrl !== "string"
+      || !/^data:image\\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(accessory.imageUrl)) {
+      throw new Error("v5 只允许保存 PNG tooltip 裁剪");
+    }
+  }
+  return payload;
+}
+
+function readAccessoryStore() {
+  if (!existsSync(storePath)) return emptyAccessoryStore();
+  try {
+    return JSON.stringify(validateStorePayload(JSON.parse(readFileSync(storePath, "utf8"))));
+  } catch {
+    return emptyAccessoryStore();
+  }
+}
+
+function emptyAccessoryStore() {
+  return JSON.stringify({
+    schema: storeSchema,
+    version: 1,
+    savedAt: null,
+    accessories: [],
+  });
+}
+
+function readRequestBody(request, maxBytes) {
+  return new Promise((resolveBody, rejectBody) => {
+    const chunks = [];
+    let size = 0;
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        rejectBody(new Error("保存数据过大"));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolveBody(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", rejectBody);
+  });
+}
+
+function writeHead(response, status, extraHeaders = {}) {
+  response.writeHead(status, { ...baseHeaders, ...extraHeaders });
+}
+
+function sendText(response, status, message) {
+  writeHead(response, status, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+  response.end(message);
+}
+
+const configuredPort = Number.parseInt(process.env.TRAVEL_HUNTER_PORT || "0", 10);
+const listenPort = Number.isInteger(configuredPort) && configuredPort >= 0 && configuredPort <= 65535 ? configuredPort : 0;
+server.listen(listenPort, "127.0.0.1", () => {
+  const address = server.address();
+  const url = "http://127.0.0.1:" + address.port + "/";
+  console.log("Travel Hunter Accessory Tool v5 started.");
+  console.log("Keep this window open while using the tool.");
+  console.log("Tool URL: " + url);
+  if (process.env.TRAVEL_HUNTER_NO_OPEN !== "1") execFile("cmd", ["/c", "start", "", url]);
 });
 `;
 }

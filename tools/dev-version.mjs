@@ -6,8 +6,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const version = process.argv[2] ?? "v3";
 const extraArgs = process.argv.slice(3);
 
-if (!["v1", "v2", "v3-old", "v3", "v4", "android-v2"].includes(version)) {
-  throw new Error("Usage: node tools/dev-version.mjs [v1|v2|v3-old|v3|v4|android-v2] [vite args...]");
+if (!["v1", "v2", "v3-old", "v3", "v4", "v5", "android-v2"].includes(version)) {
+  throw new Error("Usage: node tools/dev-version.mjs [v1|v2|v3-old|v3|v4|v5|android-v2] [vite args...]");
 }
 
 execFileSync(

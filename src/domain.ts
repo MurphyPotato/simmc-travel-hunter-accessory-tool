@@ -35,6 +35,7 @@ export interface Accessory {
   affixes: Affix[];
   source?: "manual" | "ocr" | "example" | "blank";
   imageUrl?: string;
+  imageKind?: "tooltip-crop";
 }
 
 export interface DamageBreakdown {
